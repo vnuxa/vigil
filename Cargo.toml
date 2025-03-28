@@ -1,0 +1,16 @@
+[package]
+name = "vigil"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic"
+default-features = false
+features = [
+    "tokio",
+    "wayland",
+    "wgpu", # IMPORTANT: enable when hyprland fixed the vulkan thingy
+    "winit",
+    # "advanced"
+
+]
