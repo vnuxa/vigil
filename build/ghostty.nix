@@ -17,14 +17,15 @@ in
   stdenv.mkDerivation (finalAttrs: {
     pname = "ghostty";
     version = "1.1.3";
-    src = fetchFromGitHub {
+    source = fetchFromGitHub {
       owner = "ghostty-org";
       repo = "ghostty";
       tag = "v${finalAttrs.version}";
       hash = "sha256-YHoyW+OFKxzKq4Ta/XUA9Xu0ieTfCcJo3khKpBGSnD4=";
     };
+    src = finalAttrs.source;
 
-    # deps = callPackage (finalAttrs.src + deps/build.zig.zon.nix) {name = "ghostty-cache-${finalAttrs.version}";};
+    deps = ./deps.nix;
 
     nativeBuildInputs = [
       ncurses
