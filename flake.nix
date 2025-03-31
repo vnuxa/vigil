@@ -26,7 +26,12 @@
       pkgs = import nixpkgs {
         inherit system overlays;
       };
+      ghostty_package = pkgs.callPackage ./build/ghostty.nix {};
+      #           pkgs.ghostty.overrideAttrs (final_attrs: previous_attrs: {
+      #   appRuntime = "none";
+      # });
       libraries = with pkgs; [
+        ghostty_package
         wayland
         pkg-config
         libGL
@@ -107,6 +112,7 @@
           wayland
           libGL
           libxkbcommon
+          ghostty_package
         ])}";
       };
     });

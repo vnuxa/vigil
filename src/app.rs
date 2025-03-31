@@ -1,7 +1,13 @@
-use cosmic::{widget::text_input, Action, Application, Task};
+use alacritty_terminal::tty::{Options, Shell};
+use cosmic::{widget::{column, text_input, Column}, Action, Application, Task};
+
+use crate::runtimes::libghostty::Terminal;
+
+// use crate::runtimes::alacritty::{Terminal, TerminalOptions};
 
 pub struct VigilApp {
     core: cosmic::Core,
+    terminal: Terminal,
     terminal_buffer: String
 }
 
@@ -9,6 +15,7 @@ pub struct VigilApp {
 pub enum VigilMessages {
     WriteBuffer(String)
 }
+
 
 impl Application for VigilApp {
     type Message = VigilMessages;
@@ -23,6 +30,22 @@ impl Application for VigilApp {
             Self {
                 core,
                 terminal_buffer: "".to_string(),
+                // terminal: Terminal::new(TerminalOptions {
+                //     size: alacritty_terminal::event::WindowSize {
+                //         num_lines: 50,
+                //         num_cols: 50,
+                //         cell_width: 10,
+                //         cell_height: 10,
+                //     },
+                //     id: 0,
+                //     options: Options {
+                //         shell: Some(Shell::new("echo".to_string(), vec![ "'hi there'".to_string() ])),
+                //         working_directory: None,
+                //         ..Default::default()
+                //     },
+                //     scrolling_history: 100
+                // })
+                terminal: Terminal::new()
             },
 
             Task::none()
@@ -30,9 +53,17 @@ impl Application for VigilApp {
     }
 
     fn view(&self) -> cosmic::Element<Self::Message> {
-        text_input("", &self.terminal_buffer)
-            .on_input(|new_buffer| VigilMessages::WriteBuffer(new_buffer))
-            .into()
+        let mut column_children = Vec::new();
+        // for (line, text) in self.terminal.buffer() {
+        //     println!("hey i got text for line: {} |||| with text: {}", line, text);
+        //     column_children.push(cosmic::widget::text(text).into());
+        // }
+        column_children.push(
+            text_input("", &self.terminal_buffer)
+                .on_input(|new_buffer| VigilMessages::WriteBuffer(new_buffer)).into()
+        );
+
+        Column::from_vec(column_children).into()
     }
 
     fn update(&mut self, message: Self::Message) -> cosmic::Task<Action<Self::Message>> {

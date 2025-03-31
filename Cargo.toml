@@ -3,6 +3,10 @@ name = "vigil"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+syscalls = { version = "0.6", default-features = false }
+alacritty_terminal = "0.25.0"
+
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic"
 default-features = false
@@ -14,3 +18,6 @@ features = [
     # "advanced"
 
 ]
+
+[build-dependencies]
+pkg-config = "0.3.17"
