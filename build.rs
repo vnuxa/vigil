@@ -1,7 +1,13 @@
 // use std::ops::Bound;
 
 fn main() {
+    println!("cargo:rustc-link-lib=ghostty");
 
+    let bindings = bindgen::Builder::default()
+        .header("ghostty.h")
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .generate()
+        .expect("unable to generate ghostty c bindings to rust");
 }
 
 //

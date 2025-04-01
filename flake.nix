@@ -40,6 +40,7 @@
         fontconfig
         freetype
         libxkbcommon
+        libclang
         # openssl
       ];
       rustToolchain = pkgs.rust-bin.beta.latest.default; # beta required due to anyhow requiring cargo above 1.83
@@ -86,6 +87,7 @@
               pkgs.lib.makeLibraryPath (with pkgs; [
                 libxkbcommon
                 vulkan-loader
+                ghostty_package
                 xorg.libX11
                 xorg.libXcursor
                 xorg.libXi

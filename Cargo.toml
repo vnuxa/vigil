@@ -21,3 +21,4 @@ features = [
 
 [build-dependencies]
 pkg-config = "0.3.17"
+bindgen = "0.71.1"
