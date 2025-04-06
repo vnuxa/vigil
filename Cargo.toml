@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-syscalls = { version = "0.6", default-features = false }
-alacritty_terminal = "0.25.0"
+nix = { version = "0.29.0", features = [ "process", "term", "socket" ] }
+vte = { version = "0.15.0", features = [ "ansi", "std" ]}
+tokio = { version = "1", features = ["full"] }
+unicode-width = "0.2"
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic"
@@ -18,6 +20,12 @@ features = [
     # "advanced"
 
 ]
+
+[dependencies.ttf-parser]
+version = "0.25"
+default-features = false
+features = ["opentype-layout", "variable-fonts", "glyph-names", "no-std-float"]
+
 
 [build-dependencies]
 pkg-config = "0.3.17"
