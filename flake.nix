@@ -26,12 +26,7 @@
       pkgs = import nixpkgs {
         inherit system overlays;
       };
-      ghostty_package = pkgs.callPackage ./build/ghostty.nix {};
-      #           pkgs.ghostty.overrideAttrs (final_attrs: previous_attrs: {
-      #   appRuntime = "none";
-      # });
       libraries = with pkgs; [
-        ghostty_package
         wayland
         pkg-config
         libGL
@@ -41,7 +36,6 @@
         freetype
         libxkbcommon
         libclang
-        rustPlatform.bindgenHook
         # openssl
       ];
       rustToolchain = pkgs.rust-bin.beta.latest.default; # beta required due to anyhow requiring cargo above 1.83
@@ -70,7 +64,6 @@
           pkg-config
           libclang
           makeBinaryWrapper
-          rustPlatform.bindgenHook
         ];
 
         RUSTFLAGS = map (a: "-C link-arg=${a}") [
@@ -90,7 +83,6 @@
               pkgs.lib.makeLibraryPath (with pkgs; [
                 libxkbcommon
                 vulkan-loader
-                ghostty_package
                 xorg.libX11
                 xorg.libXcursor
                 xorg.libXi
@@ -113,12 +105,10 @@
       devShells.default = pkgs.mkShell {
         buildInputs = libraries;
 
-        GHOSTTY_HEADER = "${ghostty_package}/include/ghostty.h";
         LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath (with pkgs; [
           wayland
           libGL
           libxkbcommon
-          ghostty_package
           libclang
         ])}";
       };

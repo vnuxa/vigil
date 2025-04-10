@@ -4,10 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-nix = { version = "0.29.0", features = [ "process", "term", "socket" ] }
+nix = { version = "0.29.0", features = [ "process", "term", "socket", "fs", "poll" ] }
 vte = { version = "0.15.0", features = [ "ansi", "std" ]}
 tokio = { version = "1", features = ["full"] }
 unicode-width = "0.2"
+signal-hook = "0.3.17"
+lazy_static = "1.5.0"
+
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic"

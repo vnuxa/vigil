@@ -8,9 +8,10 @@ mod runtimes;
 
 fn main() {
     // let mut term: Terminal<80, 80> = Terminal::init(None);
+    // term.make_display();
     // term.update_buffer();
 
-    println!("after all of that i got a display like this");
+    // println!("after all of that i got a display like this");
     //
     // for row in term.display.cells {
     //
