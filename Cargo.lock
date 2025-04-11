@@ -4744,6 +4744,7 @@ dependencies = [
  "libcosmic",
  "nix 0.29.0",
  "pkg-config",
+ "polling 3.7.4",
  "signal-hook",
  "tokio",
  "ttf-parser 0.25.1",

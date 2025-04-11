@@ -1,4 +1,7 @@
-use std::{io::Read, thread};
+use std::{
+    io::{Read, Write},
+    thread,
+};
 
 use cosmic::{
     widget::{column, text_input, Column},
@@ -20,6 +23,7 @@ pub struct VigilApp<const NUM_ROW: usize, const NUM_COLUMN: usize> {
 pub enum VigilMessages {
     WriteBuffer(String),
     StdoutRead(Vec<u8>),
+    StdinInput(char),
 }
 
 impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Application for VigilApp<NUM_ROW, NUM_COLUMN> {
@@ -70,6 +74,18 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Application for VigilApp<NUM
                 // println!("before display")
                 // self.terminal.make_display();
                 println!("after update term")
+            }
+            VigilMessages::StdinInput(char) => {
+                println!("got input {:?}", char);
+                // let stream_clone = self.terminal.stdout_stream.clone();
+                // let mut stream = *stream_clone;
+                println!("got stream");
+                let mut buffer = [0, 0, 0, 0];
+                // println!("file descriptor: {:?}", self.terminal.master_fd);
+                self.terminal
+                    .write_pty(char.encode_utf8(&mut buffer).as_bytes());
+                // let result = stream.write(char.encode_utf8(&mut buffer).as_bytes());
+                // println!("got result {:?}", result);
             }
         }
         println!("hey i got buffer {:?}", self.terminal_buffer);

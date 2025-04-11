@@ -1,15 +1,18 @@
 use std::cell::RefMut;
 use std::io::{IsTerminal, Read, Write};
+use std::num::NonZeroUsize;
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::process::Child;
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::task::Waker;
+use std::{thread, u8};
 // use std::os::unix::net::{UnixListener, UnixStream};
 use std::{os::fd::RawFd, process::Command, time::Duration};
 
-use cosmic::iced::{stream, Subscription};
+use cosmic::iced::futures::StreamExt;
+use cosmic::iced::{futures, stream, Subscription};
 use cosmic::Element;
 use nix::fcntl::FcntlArg::{F_GETFL, F_SETFL};
 use nix::fcntl::{self, OFlag};
@@ -19,7 +22,8 @@ use nix::libc::{
 use nix::poll::{self, PollFd, PollFlags, PollTimeout};
 use nix::pty::{forkpty, openpty, ForkptyResult};
 use nix::sys::socket::MsgFlags;
-use nix::unistd::{close, read, setsid};
+use nix::unistd::{close, read, setsid, write};
+use polling::{Events, Poller};
 use signal_hook::SigId;
 use tokio::net::{UnixListener as TokioListener, UnixSocket as TokioSocket};
 use tokio::task::spawn_blocking;
@@ -30,12 +34,13 @@ use crate::app::main::VigilMessages;
 
 pub struct Terminal<const NUM_ROW: usize, const NUM_COLUMN: usize> {
     pub read_buffer: Vec<u8>,
-    pub display: TerminalDisplay<NUM_ROW, NUM_COLUMN>,
+    pub display: TerminalDisplay<VigilMessages>,
     pub cursor_x: usize,
     pub cursor_y: usize,
     pub current_style: DisplayStyle,
     pub previous_bundle_index: usize,
     pub stdout_stream: Arc<Mutex<UnixStream>>,
+    pub master_fd: RawFd,
 }
 
 impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN> {
@@ -56,7 +61,11 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
         // let stdout_fd = spawn_pty_with_shell(default_shell);
         Terminal::<NUM_ROW, NUM_COLUMN> {
             read_buffer: Vec::new(),
-            display: TerminalDisplay::new("Lilex Nerd Font".to_string(), 16.0),
+            display: TerminalDisplay::new(
+                "Lilex Nerd Font".to_string(),
+                16.0,
+                Box::new(|char| VigilMessages::StdinInput(char)),
+            ),
             current_style: DisplayStyle {
                 background: None,
                 foreground: None,
@@ -65,6 +74,7 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
             cursor_x: 0,
             cursor_y: 0,
             previous_bundle_index: 0,
+            master_fd: pty.file,
             stdout_stream: Arc::new(Mutex::new(pty.read_io())),
             // make it of type shell
         }
@@ -74,7 +84,7 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
         if self.cursor_x < NUM_COLUMN {
             self.cursor_x += 1;
         } else {
-            println!("cells {:?}", self.display.cells);
+            // println!("cells {:?}", self.display.cells);
             println!("y is {:?}", self.cursor_y);
             self.cursor_x = 0;
             self.cursor_y += 1;
@@ -98,6 +108,10 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
             character_end: self.cursor_x,
             unicode_positions: Vec::new(),
         }
+    }
+
+    pub fn write_pty(&self, buffer: &[u8]) -> usize {
+        unsafe { write(OwnedFd::from_raw_fd(self.master_fd), buffer).unwrap() }
     }
 }
 
@@ -142,7 +156,7 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
         //     style: self.current_style
         // };
         self.cursor_forward(1);
-        println!("[print] {:?}", c);
+        // println!("[print] {:?}", c);
     }
 
     fn execute(&mut self, byte: u8) {
@@ -161,37 +175,37 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
             }
             _ => {}
         }
-        println!("[execute] {:02x}", byte);
+        // println!("[execute] {:02x}", byte);
         // println!("[thing]: {:?}", self.display.cells)
     }
 
     fn hook(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
-        println!(
-            "[hook] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
-            params, intermediates, ignore, c
-        );
+        // println!(
+        //     "[hook] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
+        //     params, intermediates, ignore, c
+        // );
     }
 
     fn put(&mut self, byte: u8) {
-        println!("[put] {:02x}", byte);
+        // println!("[put] {:02x}", byte);
     }
 
     fn unhook(&mut self) {
-        println!("[unhook]");
+        // println!("[unhook]");
     }
 
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
-        println!(
-            "[osc_dispatch] params={:?} bell_terminated={}",
-            params, bell_terminated
-        );
+        // println!(
+        //     "[osc_dispatch] params={:?} bell_terminated={}",
+        //     params, bell_terminated
+        // );
     }
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
-        println!(
-            "[csi_dispatch] params={:#?}, intermediates={:?}, ignore={:?}, char={:?}",
-            params, intermediates, ignore, c
-        );
+        // println!(
+        //     "[csi_dispatch] params={:#?}, intermediates={:?}, ignore={:?}, char={:?}",
+        //     params, intermediates, ignore, c
+        // );
 
         match c {
             'm' => {}
@@ -200,10 +214,10 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
     }
 
     fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
-        println!(
-            "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
-            intermediates, ignore, byte
-        );
+        // println!(
+        //     "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
+        //     intermediates, ignore, byte
+        // );
     }
 }
 
@@ -351,48 +365,78 @@ impl Pty {
         // let mut parser = Parser::new();
 
         thread::spawn(move || {
+            // let mut buf  = []
+            // futures
+            let poller = Poller::new().unwrap();
+
+            // use polling here instead of loop
+
+            unsafe {
+                poller
+                    .add_with_mode(
+                        self.file,
+                        polling::Event::readable(0),
+                        polling::PollMode::Level,
+                    )
+                    .unwrap()
+            }
+
+            let mut events = Events::with_capacity(NonZeroUsize::new(1024).unwrap());
+
             loop {
-                println!("repeating read fd");
-                match read_from_fd(self.file) {
-                    Some(read_bytes) => {
-                        // println!("more messaged to read! {:?}", read_bytes);
-                        // parser.advance(self, &read_bytes);
-                        println!("read bytes {:?}", read_bytes);
-                        sender.write(&read_bytes).unwrap();
-                        // self.read_buffer.append(&mut read_bytes);
-                    }
-                    None => {
-                        // no more data to read
-                        println!(
-                            "no more data to read ",
-                            // String::from_utf8_lossy(&self.read_buffer.clone())
-                        );
-                        panic!("no more data to read?");
-                        // break;
+                events.clear();
+                let _ = poller.wait(&mut events, None).unwrap();
+
+                for event in events.iter() {
+                    match event.key {
+                        // add read write stuff here, and make the thing that sends to main thread
+                        // to update
                     }
                 }
+
+                // old
+                // println!("repeating read fd");
+                // match read_from_fd(self.file) {
+                //     Some(read_bytes) => {
+                //         // println!("more messaged to read! {:?}", read_bytes);
+                //         // parser.advance(self, &read_bytes);
+                //         println!("read bytes {:?}", read_bytes);
+                //         sender.write_all(&read_bytes).unwrap();
+                //         // self.read_buffer.append(&mut read_bytes);
+                //     }
+                //     None => {
+                //         // no more data to read
+                //         println!(
+                //             "no more data to read ",
+                //             // String::from_utf8_lossy(&self.read_buffer.clone())
+                //         );
+                //         panic!("no more data to read?");
+                //         // break;
+                //     }
+                // }
             }
         });
 
-        return reciever;
+        reciever
     }
 }
 
-pub fn make_io_subscription(stream: Arc<Mutex<UnixStream>>) -> Subscription<VigilMessages> {
+pub fn make_io_subscription(stream_stdout: Arc<Mutex<UnixStream>>) -> Subscription<VigilMessages> {
     Subscription::run_with_id(
         1,
         stream::channel(100, move |mut output| async move {
             let mut buf = [0; 65536];
             spawn_blocking(move || loop {
-                let mut stream = stream.lock().unwrap();
-                if let Err(msg) = stream.read(&mut buf) {
+                let mut stdout = stream_stdout.lock().unwrap();
+                if let Err(msg) = stdout.read(&mut buf) {
                     println!("needs to wait?");
                 }
                 output
                     .try_send(VigilMessages::StdoutRead(buf.to_vec()))
                     .unwrap();
-                println!("got msg");
+                // println!("got msg");
             });
+            println!("thread after!!");
 
             loop {
                 cosmic::iced_futures::futures::pending!();
@@ -428,12 +472,11 @@ fn read_from_fd(fd: RawFd) -> Option<Vec<u8>> {
     }
 }
 
-impl<Message, const NUM_ROW: usize, const NUM_COLUMN: usize>
-    From<TerminalDisplay<NUM_ROW, NUM_COLUMN>> for Element<'_, Message>
+impl<'a, Message> From<TerminalDisplay<Message>> for Element<'a, Message>
 where
-    Message: Clone,
+    Message: Clone + 'a,
 {
-    fn from(terminal_box: TerminalDisplay<NUM_ROW, NUM_COLUMN>) -> Self {
+    fn from(terminal_box: TerminalDisplay<Message>) -> Self {
         Self::new(terminal_box)
     }
 }
