@@ -1,3 +1,4 @@
+use core::str;
 use std::sync::Arc;
 use std::{ops::Deref, rc::Rc, sync::Weak};
 
@@ -36,7 +37,7 @@ pub struct TerminalDisplay<Message> {
     // TODO: try the performance when the display bundle is in a fixed size array
     //
     // TODO: add a visible column amount and visible row amount
-    pub cells: Vec<Vec<DisplayBundle>>,
+    pub cells: Vec<Vec<DisplayCell>>,
     pub glyph_size: f32,
     pub font: String,
     pub line_height: f32,
@@ -61,7 +62,7 @@ pub struct DisplayBundle {
 #[derive(Clone, Copy)]
 pub struct DisplayCell {
     pub character: char,
-    pub style: DisplayStyle,
+    pub style: Option<DisplayStyle>,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -203,48 +204,38 @@ where
         // have a background specified
         {}
 
+        let mut previous_style: Option<DisplayStyle> = None;
+        let mut bundle_text: Vec<char> = Vec::new();
         // TODO: try performance with just regular mutable index
         for (index, row) in self.cells.iter().enumerate() {
             let mut offset = 0;
-            for bundle in row {
+            for cell in row {
+                let mut char_width = 1;
+                if cell.character.is_ascii() {
+                    if previous_style == cell.style {
+                        bundle_text.insert(bundle_text.len(), cell.character);
+                        // bundle_text[bundle_text.len()] = cell.character;
+                        continue;
+                    } else {
+                        previous_style = cell.style;
+                    }
+                } else {
+                    char_width = cell.character.width().unwrap();
+                    offset += char_width;
+                    previous_style = None;
+                }
                 let position = Point {
-                    x: view_position.x + self.glyph_size * (bundle.character_start + offset) as f32,
+                    x: view_position.x + self.glyph_size * (index + offset) as f32,
                     // x: view_position.x + offset,
                     y: view_position.y + ((self.line_height) * index as f32),
                 }; // position
 
-                let mut bundle_offset = 0;
-                for position in bundle.unicode_positions.iter() {
-                    let width = bundle.characters[*position].width().unwrap();
-
-                    if width > 1 {
-                        bundle_offset += width;
-                        offset += bundle_offset - 1;
-                    }
-                }
                 // offset += glyph_size * (bundle.character_start) as f32;
 
-                let size = if bundle.character_end == bundle.character_start {
-                    Size::new(
-                        self.glyph_size
-                            * (if bundle_offset == 0 { 1 } else { bundle_offset }) as f32,
-                        self.line_height,
-                    )
-                } else {
-                    // TODO:  using a workaround for the glyph size with other fonts, dont know how
-                    // this will work out with longer texts
-                    Size::new(
-                        self.glyph_size
-                            * (bundle.character_end - bundle.character_start + bundle_offset + 1)
-                                as f32,
-                        self.line_height,
-                    )
-                    // without the 0.05 hack above
-                    // Size::new(self.glyph_size * (bundle.character_end - bundle.character_start) as f32 + self.glyph_size + 1.0, self.line_height)
-                };
-                // if bundle.character_start != bundle.character_end {
-                // println!("not equal");
-
+                let size = Size::new(
+                    self.glyph_size * (char_width + bundle_text.len()) as f32,
+                    self.line_height,
+                );
                 renderer.fill_quad(
                     Quad {
                         bounds: Rectangle::new(position, size),
@@ -261,7 +252,13 @@ where
                 // }
                 renderer.fill_text(
                     Text {
-                        content: bundle.characters.iter().map(ToString::to_string).collect(),
+                        // content: bundle.characters.iter().map(ToString::to_string).collect(),
+                        content: if bundle_text.is_empty() {
+                            cell.character.to_string()
+                        } else {
+                            // str::from_utf8(bun)
+                            String::from_iter(bundle_text.iter())
+                        },
                         size: Pixels(self.line_height),
                         line_height: LineHeight::Absolute(Pixels(self.line_height)),
                         // bounds: Size::new(layout.bounds().width, self.line_height),

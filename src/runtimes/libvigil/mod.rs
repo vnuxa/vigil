@@ -44,7 +44,7 @@ pub struct Terminal<const NUM_ROW: usize, const NUM_COLUMN: usize> {
     pub display: TerminalDisplay<VigilMessages>,
     pub cursor_x: usize,
     pub cursor_y: usize,
-    pub current_style: DisplayStyle,
+    pub current_style: Option<DisplayStyle>,
     pub previous_bundle_index: usize,
     pub stdout_stream: UnixStream,
     pub stdin_sender: UnixStream,
@@ -75,11 +75,7 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
                 16.0,
                 Box::new(|char| VigilMessages::StdinInput(char)),
             ),
-            current_style: DisplayStyle {
-                background: None,
-                foreground: None,
-                style_metadata: 0,
-            },
+            current_style: None,
             cursor_x: 0,
             cursor_y: 0,
             previous_bundle_index: 0,
@@ -109,15 +105,16 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
         }
     }
 
-    fn make_bundle(&self, c: char) -> DisplayBundle {
-        DisplayBundle {
-            characters: vec![c],
-            style: self.current_style,
-            character_start: self.cursor_x,
-            character_end: self.cursor_x,
-            unicode_positions: Vec::new(),
-        }
-    }
+    // fn make_bundle(&self, c: char) -> DisplayBundle {
+    //     DisplayBundle {
+    //         characters: vec![c],
+    //         // style: None,
+    //         // style: self.current_style,
+    //         character_start: self.cursor_x,
+    //         character_end: self.cursor_x,
+    //         unicode_positions: Vec::new(),
+    //     }
+    // }
 }
 
 impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW, NUM_COLUMN> {
@@ -128,35 +125,61 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
         //     "got the cell thiing: {:?} with cursor y {:?}",
         //     self.display.cells, self.cursor_y
         // );
-        if let Some(cell) = self.display.cells[self.cursor_y].get_mut(self.previous_bundle_index) {
-            // merge current cell to a bundle if its style matches
-            if cell.style == self.current_style {
-                cell.characters.push(c);
-                cell.character_end = self.cursor_x;
-                if !c.is_ascii() {
-                    cell.unicode_positions.push(cell.characters.len() - 1);
-                }
-            } else {
-                // make a new bundle if style does not match
-                self.display.cells[self.cursor_y].push(DisplayBundle {
-                    characters: vec![c],
-                    style: self.current_style,
-                    character_start: self.cursor_x,
-                    character_end: self.cursor_x,
-                    unicode_positions: if c.is_ascii() { Vec::new() } else { vec![0] },
-                });
-                self.previous_bundle_index = self.display.cells.len();
-            }
+        let mut cell;
+        // let cell = self.display.cells.get_mut(self.cursor_y).unwrap();
+        if let Some(obj_cell) = self.display.cells.get_mut(self.cursor_y) {
+            println!("it already exists");
+            cell = obj_cell;
         } else {
-            self.display.cells[self.cursor_y].push(DisplayBundle {
-                characters: vec![c],
-                style: self.current_style,
-                character_start: self.cursor_x,
-                character_end: self.cursor_x,
-                unicode_positions: if c.is_ascii() { Vec::new() } else { vec![0] },
-            });
-            self.previous_bundle_index = self.display.cells.len();
+            println!("using the non exist method");
+            self.display.cells.insert(self.cursor_y, Vec::new());
+            cell = &mut self.display.cells[self.cursor_y];
         }
+        // FIX: right now, you cannot add a cell at a specific index
+        // big issue if you move cursor left 10 times and want to insert characters there
+        cell.push(
+            // self.cursor_x,
+            DisplayCell {
+                character: c,
+                style: self.current_style,
+            },
+        );
+        // {
+
+        // cell = DisplayCell {
+        //     character: c,
+        //     style: self.current_style,
+        // };
+        // }
+        // if let Some(cell) = self.display.cells[self.cursor_y].get_mut(self.previous_bundle_index) {
+        //     // merge current cell to a bundle if its style matches
+        //     if cell.style == self.current_style {
+        //         cell.characters.push(c);
+        //         cell.character_end = self.cursor_x;
+        //         if !c.is_ascii() {
+        //             cell.unicode_positions.push(cell.characters.len() - 1);
+        //         }
+        //     } else {
+        //         // make a new bundle if style does not match
+        //         self.display.cells[self.cursor_y].push(DisplayBundle {
+        //             characters: vec![c],
+        //             style: self.current_style,
+        //             character_start: self.cursor_x,
+        //             character_end: self.cursor_x,
+        //             unicode_positions: if c.is_ascii() { Vec::new() } else { vec![0] },
+        //         });
+        //         self.previous_bundle_index = self.display.cells.len();
+        //     }
+        // } else {
+        //     self.display.cells[self.cursor_y].push(DisplayBundle {
+        //         characters: vec![c],
+        //         style: self.current_style,
+        //         character_start: self.cursor_x,
+        //         character_end: self.cursor_x,
+        //         unicode_positions: if c.is_ascii() { Vec::new() } else { vec![0] },
+        //     });
+        //     self.previous_bundle_index = self.display.cells.len();
+        // }
         // self.display.cells[self.cursor_y][self.cursor_x] = DisplayCell {
         //     character: c,
         //     style: self.current_style
@@ -232,40 +255,40 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
                 // clear screen from cursor to end
                 0 => {
                     println!("clearing screen from cursot to end");
-                    let mut index = 0;
-                    for bundle in &mut self.display.cells[self.cursor_y] {
-                        if bundle.character_start >= self.cursor_x
-                            && bundle.character_end <= self.cursor_x
-                        {
-                            bundle.character_end = self.cursor_x;
-                            bundle
-                                .characters
-                                .truncate(bundle.character_start - self.cursor_x);
-                            index += 2;
-                            break;
-                        }
-                        index += 1;
-                    }
-                    self.display.cells[self.cursor_y].truncate(index);
+                    // let mut index = 0;
+                    // for bundle in &mut self.display.cells[self.cursor_y] {
+                    //     if bundle.character_start >= self.cursor_x
+                    //         && bundle.character_end <= self.cursor_x
+                    //     {
+                    //         bundle.character_end = self.cursor_x;
+                    //         bundle
+                    //             .characters
+                    //             .truncate(bundle.character_start - self.cursor_x);
+                    //         index += 2;
+                    //         break;
+                    //     }
+                    //     index += 1;
+                    // }
+                    self.display.cells[self.cursor_y].truncate(self.cursor_x);
                     self.display.cells.truncate(self.cursor_y + 1);
                 }
                 // clear screen from cursor to beggining
                 1 => {
                     println!("clearing screen from cursot to beggining");
-                    let mut index = 0;
-                    for bundle in &mut self.display.cells[self.cursor_y] {
-                        if bundle.character_start >= self.cursor_x
-                            && bundle.character_end <= self.cursor_x
-                        {
-                            bundle.character_start = self.cursor_x;
-                            bundle.characters = bundle.characters[self.cursor_x..].to_vec();
-                            index += 2;
-                            break;
-                        }
-                        index += 1;
-                    }
+                    // let mut index = 0;
+                    // for bundle in &mut self.display.cells[self.cursor_y] {
+                    //     if bundle.character_start >= self.cursor_x
+                    //         && bundle.character_end <= self.cursor_x
+                    //     {
+                    //         bundle.character_start = self.cursor_x;
+                    //         bundle.characters = bundle.characters[self.cursor_x..].to_vec();
+                    //         index += 2;
+                    //         break;
+                    //     }
+                    //     index += 1;
+                    // }
                     self.display.cells[self.cursor_y] =
-                        self.display.cells[self.cursor_y][index..].to_vec();
+                        self.display.cells[self.cursor_y][self.cursor_x..].to_vec();
 
                     self.display.cells = self.display.cells[..self.cursor_y + 1].to_vec();
                 }
@@ -285,40 +308,40 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
                 // clear from cursor to end
                 0 => {
                     println!("clearing from cursot to end");
-                    let mut index = 0;
-                    for bundle in &mut self.display.cells[self.cursor_y] {
-                        if bundle.character_start >= self.cursor_x
-                            && bundle.character_end <= self.cursor_x
-                        {
-                            bundle.character_end = self.cursor_x;
-                            bundle
-                                .characters
-                                .truncate(bundle.character_start - self.cursor_x);
-                            index += 2;
-                            break;
-                        }
-                        index += 1;
-                    }
-                    self.display.cells[self.cursor_y].truncate(index);
+                    // let mut index = 0;
+                    // for bundle in &mut self.display.cells[self.cursor_y] {
+                    //     if bundle.character_start >= self.cursor_x
+                    //         && bundle.character_end <= self.cursor_x
+                    //     {
+                    //         bundle.character_end = self.cursor_x;
+                    //         bundle
+                    //             .characters
+                    //             .truncate(bundle.character_start - self.cursor_x);
+                    //         index += 2;
+                    //         break;
+                    //     }
+                    //     index += 1;
+                    // }
+                    self.display.cells[self.cursor_y].truncate(self.cursor_x);
                 }
                 // clear from cursor to beggining
                 1 => {
                     println!("clearing from cursot to beggining");
-                    let mut index = 0;
-                    for bundle in &mut self.display.cells[self.cursor_y] {
-                        if bundle.character_start >= self.cursor_x {
-                            if bundle.character_end <= self.cursor_x {
-                                bundle.character_start = self.cursor_x;
-                                bundle.characters = bundle.characters[self.cursor_x..].to_vec();
-                            } else {
-                                index += 1;
-                                break;
-                            }
-                        }
-                        index += 1;
-                    }
+                    // let mut index = 0;
+                    // for bundle in &mut self.display.cells[self.cursor_y] {
+                    //     if bundle.character_start >= self.cursor_x {
+                    //         if bundle.character_end <= self.cursor_x {
+                    //             bundle.character_start = self.cursor_x;
+                    //             bundle.characters = bundle.characters[self.cursor_x..].to_vec();
+                    //         } else {
+                    //             index += 1;
+                    //             break;
+                    //         }
+                    //     }
+                    //     index += 1;
+                    // }
                     self.display.cells[self.cursor_y] =
-                        self.display.cells[self.cursor_y][index..].to_vec();
+                        self.display.cells[self.cursor_y][self.cursor_x..].to_vec();
                 }
                 //clear entire line
                 2 => {
