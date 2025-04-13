@@ -210,7 +210,7 @@ where
                 let position = Point {
                     x: view_position.x + self.glyph_size * (bundle.character_start + offset) as f32,
                     // x: view_position.x + offset,
-                    y: view_position.y + ((self.line_height / 2.0) * index as f32),
+                    y: view_position.y + ((self.line_height) * index as f32),
                 }; // position
 
                 let mut bundle_offset = 0;
@@ -250,13 +250,13 @@ where
                         bounds: Rectangle::new(position, size),
                         // ..Default::default()
                         border: Border {
-                            color: Color::new(0.0, 1.0, 0.0, 0.0),
+                            color: Color::new(0.0, 1.0, 0.0, 0.2),
                             width: 1.0,
                             radius: Radius::new(0),
                         },
                         ..Default::default()
                     },
-                    Color::new(1.0, 0.0, 0.0, 0.0),
+                    Color::new(1.0, 0.0, 0.0, 0.4),
                 );
                 // }
                 renderer.fill_text(
@@ -307,11 +307,23 @@ where
                 modifiers,
                 text,
                 ..
-            }) if named == modified_name => {
-                // let escape_code = match named {
-                //     Named::Insert
-                // }
-            }
+            }) => match named {
+                Named::Enter => {
+                    shell.publish(self.on_input.clone()('\x0D'));
+                    return Status::Captured;
+                }
+                Named::Space => {
+                    shell.publish(self.on_input.clone()(
+                        text.and_then(|c| c.chars().next()).unwrap_or_default(),
+                    ));
+
+                    return Status::Captured;
+                }
+                _ => (),
+            },
+            // }) if named == modified_name => match named {
+            //     _ => Status::Ignored,
+            // },
             Event::Keyboard(KeyEvent::KeyPressed {
                 key,
                 modified_key,

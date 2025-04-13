@@ -21,12 +21,11 @@ fn main() {
     //     println!();
     // }
 
-    let _ = cosmic::app::run::<VigilApp<80, 80>>(
+    let _ = cosmic::app::run::<VigilApp<120, 120>>(
         Settings::default()
             .antialiasing(true)
             .client_decorations(false)
             .debug(false),
-        ()
+        (),
     );
-
 }

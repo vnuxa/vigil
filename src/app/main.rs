@@ -17,6 +17,7 @@ pub struct VigilApp<const NUM_ROW: usize, const NUM_COLUMN: usize> {
     // if size were to change
     terminal: Terminal<NUM_ROW, NUM_COLUMN>,
     terminal_buffer: String,
+    parser: Parser,
 }
 
 #[derive(Clone, Debug)]
@@ -46,6 +47,7 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Application for VigilApp<NUM
         (
             Self {
                 core,
+                parser: Parser::new(),
                 terminal_buffer: "".to_string(),
                 terminal,
             },
@@ -63,10 +65,12 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Application for VigilApp<NUM
             // VigilMessages::StdoutRead(mut read_bytes) => { self.terminal.read_buffer.append(&mut read_bytes); self.terminal.make_display();}
             VigilMessages::StdoutRead(mut buf) => {
                 // let mut buffer = [0u8; 0x10_0000];
-                let mut parser = Parser::new();
-                println!("reading?");
-                parser.advance(&mut self.terminal, &buf);
-                self.terminal.read_buffer.append(&mut buf);
+                println!(
+                    "the buffer to a string: {:?}",
+                    String::from_utf8(buf.clone()).unwrap_or_default()
+                );
+                self.parser.advance(&mut self.terminal, &buf);
+                // self.terminal.read_buffer.append(&mut buf);
                 // self.terminal.make_display();
                 // let res = self.terminal.update_buffer();
                 // println!("got result of {:?}", res);
@@ -79,11 +83,24 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Application for VigilApp<NUM
                 println!("got input {:?}", char);
                 // let stream_clone = self.terminal.stdout_stream.clone();
                 // let mut stream = *stream_clone;
-                println!("got stream");
-                let mut buffer = [0, 0, 0, 0];
+                println!("pre send stdin stream");
+                // self.terminal.display.cells.clear();
+                // self.terminal.display.cells.push(Vec::new());
+                // self.terminal.cursor_x = 0;
+                // self.terminal.cursor_y = 0;
+                let mut buffer = [0];
+                let res = self
+                    .terminal
+                    .stdin_sender
+                    .write(char.encode_utf8(&mut buffer).as_bytes());
+                println!("got res for stdin send: {:?}", res);
+
+                // .pty
+                // .write_list
+                // .append(&mut char.encode_utf8(&mut buffer).as_bytes().to_vec());
                 // println!("file descriptor: {:?}", self.terminal.master_fd);
-                self.terminal
-                    .write_pty(char.encode_utf8(&mut buffer).as_bytes());
+                // self.terminal
+                //     .write_pty(char.encode_utf8(&mut buffer).as_bytes());
                 // let result = stream.write(char.encode_utf8(&mut buffer).as_bytes());
                 // println!("got result {:?}", result);
             }
@@ -94,7 +111,7 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Application for VigilApp<NUM
     }
 
     fn subscription(&self) -> cosmic::iced::Subscription<Self::Message> {
-        make_io_subscription(self.terminal.stdout_stream.clone())
+        make_io_subscription(self.terminal.stdout_stream.try_clone().unwrap())
         //     // println!("subscription called!");
         //     self.terminal.subscription(self.terminal.pty.file)
         //     // self.terminal.subscription()

@@ -1,4 +1,5 @@
 use std::cell::RefMut;
+use std::fs::File;
 use std::io::{IsTerminal, Read, Write};
 use std::num::NonZeroUsize;
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
@@ -14,6 +15,7 @@ use std::{os::fd::RawFd, process::Command, time::Duration};
 use cosmic::iced::futures::StreamExt;
 use cosmic::iced::{futures, stream, Subscription};
 use cosmic::Element;
+use lazy_static::lazy_static;
 use nix::fcntl::FcntlArg::{F_GETFL, F_SETFL};
 use nix::fcntl::{self, OFlag};
 use nix::libc::{
@@ -22,6 +24,7 @@ use nix::libc::{
 use nix::poll::{self, PollFd, PollFlags, PollTimeout};
 use nix::pty::{forkpty, openpty, ForkptyResult};
 use nix::sys::socket::MsgFlags;
+use nix::sys::termios::{tcgetattr, tcsetattr, InputFlags, SetArg};
 use nix::unistd::{close, read, setsid, write};
 use polling::{Events, Poller};
 use signal_hook::SigId;
@@ -32,6 +35,10 @@ use vte::{Params, Parser, Perform};
 use crate::app::display::{DisplayBundle, DisplayCell, DisplayStyle, TerminalDisplay};
 use crate::app::main::VigilMessages;
 
+lazy_static! {
+    static ref WRITE_LIST: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+}
+
 pub struct Terminal<const NUM_ROW: usize, const NUM_COLUMN: usize> {
     pub read_buffer: Vec<u8>,
     pub display: TerminalDisplay<VigilMessages>,
@@ -39,8 +46,9 @@ pub struct Terminal<const NUM_ROW: usize, const NUM_COLUMN: usize> {
     pub cursor_y: usize,
     pub current_style: DisplayStyle,
     pub previous_bundle_index: usize,
-    pub stdout_stream: Arc<Mutex<UnixStream>>,
-    pub master_fd: RawFd,
+    pub stdout_stream: UnixStream,
+    pub stdin_sender: UnixStream,
+    // pub master_fd: RawFd,
 }
 
 impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN> {
@@ -57,6 +65,7 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
         );
         // TODO: once removed the default shell for testing,
         let pty = Pty::new(Some(default_shell));
+        let (stdout_stream, stdin_sender) = pty.read_io();
 
         // let stdout_fd = spawn_pty_with_shell(default_shell);
         Terminal::<NUM_ROW, NUM_COLUMN> {
@@ -74,9 +83,9 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
             cursor_x: 0,
             cursor_y: 0,
             previous_bundle_index: 0,
-            master_fd: pty.file,
-            stdout_stream: Arc::new(Mutex::new(pty.read_io())),
-            // make it of type shell
+            // master_fd: pty.file,
+            stdout_stream,
+            stdin_sender, // make it of type shell
         }
     }
 
@@ -109,14 +118,11 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
             unicode_positions: Vec::new(),
         }
     }
-
-    pub fn write_pty(&self, buffer: &[u8]) -> usize {
-        unsafe { write(OwnedFd::from_raw_fd(self.master_fd), buffer).unwrap() }
-    }
 }
 
 impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW, NUM_COLUMN> {
     fn print(&mut self, c: char) {
+        println!("adding char {:?}", c);
         // self.out_buffer.push(c as u8);
         // println!(
         //     "got the cell thiing: {:?} with cursor y {:?}",
@@ -156,6 +162,9 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
         //     style: self.current_style
         // };
         self.cursor_forward(1);
+        // if c.to_digit(20).unwrap() != 0 {
+        //     println!("wow its null");
+        // }
         // println!("[print] {:?}", c);
     }
 
@@ -167,7 +176,9 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
                 self.display.cells.push(Vec::new());
             }
             10 => {
-                self.cursor_y += 1;
+                // self.cursor_y += 1;
+                self.cursor_forward(1);
+
                 // TODO: this wont work with scrollback i believe
                 if self.cursor_y >= self.display.cells.len() {
                     self.display.cells.push(Vec::new());
@@ -175,49 +186,161 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
             }
             _ => {}
         }
+        if byte != 00 {
+            println!("[execute] {:02x}", byte);
+        }
         // println!("[execute] {:02x}", byte);
         // println!("[thing]: {:?}", self.display.cells)
     }
 
     fn hook(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
-        // println!(
-        //     "[hook] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
-        //     params, intermediates, ignore, c
-        // );
+        println!(
+            "[hook] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
+            params, intermediates, ignore, c
+        );
     }
 
     fn put(&mut self, byte: u8) {
-        // println!("[put] {:02x}", byte);
+        println!("[put] {:02x}", byte);
     }
 
     fn unhook(&mut self) {
-        // println!("[unhook]");
+        println!("[unhook]");
     }
 
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
-        // println!(
-        //     "[osc_dispatch] params={:?} bell_terminated={}",
-        //     params, bell_terminated
-        // );
+        println!(
+            "[osc_dispatch] params={:?} bell_terminated={}",
+            params, bell_terminated
+        );
     }
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: char) {
-        // println!(
-        //     "[csi_dispatch] params={:#?}, intermediates={:?}, ignore={:?}, char={:?}",
-        //     params, intermediates, ignore, c
-        // );
+        println!(
+            "[csi_dispatch] params={:#?}, intermediates={:?}, ignore={:?}, char={:?}",
+            params, intermediates, ignore, c
+        );
+        let mut params_iter = params.iter();
+        let mut next_param_or = |default: u16| match params_iter.next() {
+            Some(&[param, ..]) if param != 0 => param,
+            _ => default,
+        };
 
         match c {
             'm' => {}
+            'J' => match next_param_or(0) {
+                // clear screen from cursor to end
+                0 => {
+                    println!("clearing screen from cursot to end");
+                    let mut index = 0;
+                    for bundle in &mut self.display.cells[self.cursor_y] {
+                        if bundle.character_start >= self.cursor_x
+                            && bundle.character_end <= self.cursor_x
+                        {
+                            bundle.character_end = self.cursor_x;
+                            bundle
+                                .characters
+                                .truncate(bundle.character_start - self.cursor_x);
+                            index += 2;
+                            break;
+                        }
+                        index += 1;
+                    }
+                    self.display.cells[self.cursor_y].truncate(index);
+                    self.display.cells.truncate(self.cursor_y + 1);
+                }
+                // clear screen from cursor to beggining
+                1 => {
+                    println!("clearing screen from cursot to beggining");
+                    let mut index = 0;
+                    for bundle in &mut self.display.cells[self.cursor_y] {
+                        if bundle.character_start >= self.cursor_x
+                            && bundle.character_end <= self.cursor_x
+                        {
+                            bundle.character_start = self.cursor_x;
+                            bundle.characters = bundle.characters[self.cursor_x..].to_vec();
+                            index += 2;
+                            break;
+                        }
+                        index += 1;
+                    }
+                    self.display.cells[self.cursor_y] =
+                        self.display.cells[self.cursor_y][index..].to_vec();
+
+                    self.display.cells = self.display.cells[..self.cursor_y + 1].to_vec();
+                }
+                //clear entire screen
+                2 => {
+                    self.display.cells = Vec::new();
+                }
+                // clear everything
+                3 => {
+                    self.display.cells = vec![Vec::new()];
+                    self.cursor_x = 0;
+                    self.cursor_y = 0;
+                }
+                _ => unimplemented!(),
+            },
+            'K' => match next_param_or(0) {
+                // clear from cursor to end
+                0 => {
+                    println!("clearing from cursot to end");
+                    let mut index = 0;
+                    for bundle in &mut self.display.cells[self.cursor_y] {
+                        if bundle.character_start >= self.cursor_x
+                            && bundle.character_end <= self.cursor_x
+                        {
+                            bundle.character_end = self.cursor_x;
+                            bundle
+                                .characters
+                                .truncate(bundle.character_start - self.cursor_x);
+                            index += 2;
+                            break;
+                        }
+                        index += 1;
+                    }
+                    self.display.cells[self.cursor_y].truncate(index);
+                }
+                // clear from cursor to beggining
+                1 => {
+                    println!("clearing from cursot to beggining");
+                    let mut index = 0;
+                    for bundle in &mut self.display.cells[self.cursor_y] {
+                        if bundle.character_start >= self.cursor_x {
+                            if bundle.character_end <= self.cursor_x {
+                                bundle.character_start = self.cursor_x;
+                                bundle.characters = bundle.characters[self.cursor_x..].to_vec();
+                            } else {
+                                index += 1;
+                                break;
+                            }
+                        }
+                        index += 1;
+                    }
+                    self.display.cells[self.cursor_y] =
+                        self.display.cells[self.cursor_y][index..].to_vec();
+                }
+                //clear entire line
+                2 => {
+                    self.display.cells[self.cursor_y] = Vec::new();
+                }
+                // clear everything
+                3 => {
+                    self.display.cells = vec![Vec::new()];
+                }
+                _ => unimplemented!(),
+            },
+            // move cursor forward by n
+            'C' => {}
             _ => {} // _ => panic!("csi '{}' dispatch not implemented ", c)
         }
     }
 
     fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
-        // println!(
-        //     "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
-        //     intermediates, ignore, byte
-        // );
+        println!(
+            "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
+            intermediates, ignore, byte
+        );
     }
 }
 
@@ -251,7 +374,7 @@ fn spawn_pty_with_shell(default_shell: String) -> RawFd {
 
 pub struct Pty {
     pub child: Child,
-    pub file: RawFd,
+    pub file: File,
     pub signal: UnixStream,
     pub signal_id: SigId,
 }
@@ -261,6 +384,12 @@ impl Pty {
         let pty = openpty(None, None).unwrap(); // TODO: make winsize argument not be a none
         let master_fd = pty.master.as_raw_fd();
         let slave_fd = pty.slave.as_raw_fd();
+
+        if let Ok(mut termios) = tcgetattr(&pty.master) {
+            termios.input_flags.set(InputFlags::IUTF8, true);
+
+            let _ = tcsetattr(&pty.master, SetArg::TCSANOW, &termios);
+        }
 
         let mut builder = if let Some((shell, args)) = default_shell {
             let mut command = Command::new(shell);
@@ -278,13 +407,14 @@ impl Pty {
         // TODO: set up shell enviroment based on a config
         // example: https://github.com/alacritty/alacritty/blob/15f1278d695776860ebcd939d30604b253788278/alacritty_terminal/src/tty/unix.rs#L230
 
+        // builder.env("TERM", "dumb");
         builder.env_remove("XDG_ACTIVATION_TOKEN");
         builder.env_remove("DESKTOP_STARTUP_ID");
 
         unsafe {
             builder.pre_exec(move || {
                 // create a new process group
-                setsid().expect("Failed to get session id");
+                setsid().expect("Failed to set session id");
 
                 // TODO: set working directory based on config
                 // if let Some() =  {
@@ -339,7 +469,7 @@ impl Pty {
 
                 Pty {
                     child,
-                    file: pty.master.into_raw_fd(),
+                    file: unsafe { File::from_raw_fd(pty.master.into_raw_fd()) },
                     signal,
                     signal_id,
                 }
@@ -350,8 +480,11 @@ impl Pty {
         }
     }
 
-    fn read_io(self) -> UnixStream {
-        let (mut sender, reciever) = UnixStream::pair().unwrap();
+    fn read_io(mut self) -> (UnixStream, UnixStream) {
+        // sender/reciever for stdout
+        let (mut out_sender, out_reciever) = UnixStream::pair().unwrap();
+        // sender/reciever for stdin
+        let (in_sender, mut in_reciever) = UnixStream::pair().unwrap();
         println!("update buffer was called");
         // let _ = self.parser.advance(self, &mut self.read_buffer);
         // let _: Option<i32> = match read_result {
@@ -371,17 +504,27 @@ impl Pty {
 
             // use polling here instead of loop
 
+            let mut polling_interest = polling::Event::readable(0);
             unsafe {
                 poller
                     .add_with_mode(
-                        self.file,
-                        polling::Event::readable(0),
+                        &self.file,
+                        // polling::Event::readable(0),
+                        polling_interest,
                         polling::PollMode::Level,
                     )
-                    .unwrap()
+                    .unwrap();
+                poller
+                    .add_with_mode(
+                        &in_reciever,
+                        polling::Event::readable(1),
+                        polling::PollMode::Level,
+                    )
+                    .unwrap();
             }
 
             let mut events = Events::with_capacity(NonZeroUsize::new(1024).unwrap());
+            let mut buffer = [0];
 
             loop {
                 events.clear();
@@ -389,8 +532,59 @@ impl Pty {
 
                 for event in events.iter() {
                     match event.key {
-                        // add read write stuff here, and make the thing that sends to main thread
-                        // to update
+                        0 => {
+                            if event.readable {
+                                match read_from_fd(self.file.as_raw_fd()) {
+                                    Some(read_bytes) => {
+                                        println!("read bytes {:?}", read_bytes);
+                                        out_sender.write_all(&read_bytes).unwrap();
+                                    }
+                                    None => {
+                                        println!("no more to read");
+                                    }
+                                }
+                                // sender.write_all(&read_bytes).unwrap();
+                                println!("readable!!");
+                            } else {
+                                println!("no reading..");
+                            }
+
+                            if event.writable {
+                                // let mut buffer =readable String::new();
+                                // let _ = in_reciever.read_to_string(&mut buffer);
+                                println!("writable!");
+                                // println!("this writable's readability is: {}", event.readable);
+                                let res = self.file.write(&buffer);
+                                println!("the result for writable: {:?}", res);
+                                // self.write(&buffer);
+                                polling_interest.writable = false;
+                                let _ = poller.modify_with_mode(
+                                    &self.file,
+                                    polling_interest,
+                                    polling::PollMode::Level,
+                                );
+                            }
+                        }
+                        1 => {
+                            println!("write list");
+                            if event.readable {
+                                println!("i see its readable");
+                                // let mut buffer = Vec::new();
+                                let _ = in_reciever.read(&mut buffer).unwrap();
+                                println!("i have obtained: {:?}", buffer);
+
+                                polling_interest.writable = true;
+                                let _ = poller.modify_with_mode(
+                                    &self.file,
+                                    polling_interest,
+                                    polling::PollMode::Level,
+                                );
+                            }
+                        }
+                        _ => {
+                            println!("hey i got some weird key: {:?}", event.key);
+                        } // add read write stuff here, and make the thing that sends to main thread
+                          // to update
                     }
                 }
 
@@ -417,18 +611,22 @@ impl Pty {
             }
         });
 
-        reciever
+        (out_reciever, in_sender)
     }
+
+    // pub fn write(&self, buffer: &[u8]) -> usize {
+    //     unsafe { write(self.file, buffer).unwrap() }
+    // }
 }
 
-pub fn make_io_subscription(stream_stdout: Arc<Mutex<UnixStream>>) -> Subscription<VigilMessages> {
+pub fn make_io_subscription(mut stream_stdout: UnixStream) -> Subscription<VigilMessages> {
     Subscription::run_with_id(
         1,
         stream::channel(100, move |mut output| async move {
             let mut buf = [0; 65536];
             spawn_blocking(move || loop {
-                let mut stdout = stream_stdout.lock().unwrap();
-                if let Err(msg) = stdout.read(&mut buf) {
+                // let mut stdout = stream_stdout;
+                if let Err(msg) = stream_stdout.read(&mut buf) {
                     println!("needs to wait?");
                 }
                 output
