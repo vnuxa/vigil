@@ -56,8 +56,8 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
         // IMPORTANT: remove this once done testing
         let default_shell = shell.unwrap_or(
             (
-                std::env::var("SHELL").unwrap(),
-                // "/run/current-system/sw/bin/fish".to_string(),
+                // std::env::var("SHELL").unwrap(),
+                "/run/current-system/sw/bin/fish".to_string(),
                 // "/nix/store/bz8zbnsaya0srmhi2k0cbx287krrmqng-nushell-0.102.0/bin/nu".to_string(),
                 Vec::new(),
             ),
@@ -73,7 +73,8 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
             display: TerminalDisplay::new(
                 "Lilex Nerd Font".to_string(),
                 16.0,
-                Box::new(|char| VigilMessages::StdinInput(char)),
+                Box::new(VigilMessages::StdinInput),
+                NUM_ROW,
             ),
             current_style: None,
             cursor_x: 0,
@@ -96,10 +97,6 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
             println!("adding cursor y in forward wrapping");
             // TODO: make scrollback from the lines that arent visible
             // self.display.cells.push(Vec::new());
-            if self.cursor_y >= self.display.cells.len() {
-                println!("making it bigger here");
-                self.display.cells.push(Vec::new());
-            }
             // IMPORTANT: might have to add a check if the cursor y s too much then make it
             // increase the scrollback
         }
@@ -119,7 +116,7 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
 
 impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW, NUM_COLUMN> {
     fn print(&mut self, c: char) {
-        println!("adding char {:?}", c);
+        // println!("adding char {:?}", c);
         // self.out_buffer.push(c as u8);
         // println!(
         //     "got the cell thiing: {:?} with cursor y {:?}",
@@ -128,22 +125,65 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
         let mut cell;
         // let cell = self.display.cells.get_mut(self.cursor_y).unwrap();
         if let Some(obj_cell) = self.display.cells.get_mut(self.cursor_y) {
-            println!("it already exists");
+            // println!("it already exists");
             cell = obj_cell;
         } else {
+            if self.display.cells.len() < self.cursor_y {
+                // self.display
+                //     .cells
+                //     .reserve(self.cursor_y - self.display.cells.len());
+                for _ in self.display.cells.len()..self.cursor_y {
+                    self.display.cells.push(Vec::with_capacity(NUM_COLUMN));
+                }
+                // println!("adding {:?}", self.cursor_y + 1 - self.display.cells.len());
+                // self.display
+                //     .cells
+                //     .reserve(self.cursor_y + 1 - self.display.cells.len());
+                // println!("len is: {:?}", self.display.cells.len());
+            }
             println!("using the non exist method");
-            self.display.cells.insert(self.cursor_y, Vec::new());
+
+            if self.display.cells.get(self.cursor_y).is_none() {
+                self.display
+                    .cells
+                    .insert(self.cursor_y, Vec::with_capacity(NUM_COLUMN));
+            }
+            // self.display.cells[self.cursor_y] = Vec::with_capacity(NUM_COLUMN);
             cell = &mut self.display.cells[self.cursor_y];
         }
         // FIX: right now, you cannot add a cell at a specific index
         // big issue if you move cursor left 10 times and want to insert characters there
-        cell.push(
-            // self.cursor_x,
-            DisplayCell {
+        if let Some(item) = cell.get_mut(self.cursor_x) {
+            cell[self.cursor_x] = DisplayCell {
                 character: c,
                 style: self.current_style,
-            },
-        );
+            };
+        } else {
+            cell.insert(
+                self.cursor_x,
+                DisplayCell {
+                    character: c,
+                    style: self.current_style,
+                },
+            );
+        }
+        // cell.push(DisplayCell {
+        //     character: c,
+        //     style: self.current_style,
+        // });
+        //
+        // cell.swap_remove(self.cursor_x);
+        // let _ = cell[self.cursor_x]
+        // std::mem::replace(
+        //     &mut cell[self.cursor_x],
+        //     DisplayCell {
+        //         character: c,
+        //         style: self.current_style,
+        //     },
+        // );
+        // cell[self.cursor_x] =
+        // self.cursor_x,
+        // );
         // {
 
         // cell = DisplayCell {
@@ -193,10 +233,11 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
 
     fn execute(&mut self, byte: u8) {
         match byte {
+            // carriage return
             13 => {
                 self.cursor_x = 0;
                 self.cursor_y += 1;
-                self.display.cells.push(Vec::new());
+                self.display.cells.push(Vec::with_capacity(NUM_COLUMN));
             }
             10 => {
                 // self.cursor_y += 1;
@@ -204,13 +245,13 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
 
                 // TODO: this wont work with scrollback i believe
                 if self.cursor_y >= self.display.cells.len() {
-                    self.display.cells.push(Vec::new());
+                    self.display.cells.push(Vec::with_capacity(NUM_COLUMN));
                 }
             }
             _ => {}
         }
         if byte != 00 {
-            println!("[execute] {:02x}", byte);
+            println!("[execute] {:02x} which is also {:?}", byte, byte);
         }
         // println!("[execute] {:02x}", byte);
         // println!("[thing]: {:?}", self.display.cells)
@@ -294,11 +335,11 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
                 }
                 //clear entire screen
                 2 => {
-                    self.display.cells = Vec::new();
+                    self.display.cells = Vec::with_capacity(NUM_ROW);
                 }
                 // clear everything
                 3 => {
-                    self.display.cells = vec![Vec::new()];
+                    self.display.cells = Vec::with_capacity(NUM_ROW);
                     self.cursor_x = 0;
                     self.cursor_y = 0;
                 }
@@ -345,16 +386,86 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
                 }
                 //clear entire line
                 2 => {
-                    self.display.cells[self.cursor_y] = Vec::new();
+                    self.display.cells[self.cursor_y] = Vec::with_capacity(NUM_COLUMN);
                 }
                 // clear everything
                 3 => {
-                    self.display.cells = vec![Vec::new()];
+                    self.display.cells = Vec::with_capacity(NUM_ROW);
                 }
                 _ => unimplemented!(),
             },
             // move cursor forward by n
-            'C' => {}
+            'C' => {
+                let amount = next_param_or(1);
+                if (self.cursor_x + amount as usize) < NUM_COLUMN {
+                    self.cursor_x = NUM_COLUMN;
+                } else {
+                    self.cursor_x += amount as usize;
+                }
+            }
+            // move cursor backward by n
+            'D' => {
+                let amount = next_param_or(1);
+                if self.cursor_x - amount as usize > 0 {
+                    self.cursor_x -= amount as usize;
+                } else {
+                    self.cursor_x = 0;
+                }
+            }
+            // move cursor up by n
+            'A' => {
+                let amount = next_param_or(1);
+                if self.cursor_y - amount as usize > 0 {
+                    self.cursor_y -= amount as usize;
+                } else {
+                    self.cursor_y = 0;
+                }
+            }
+            // // move cursor down by n
+            // 'B' => {
+            //     let amount = next_param_or(1);
+            //     if (self.cursor_y + amount as usize) < NUM_ROW {
+            //         self.cursor_y = NUM_ROW;
+            //     } else {
+            //         self.cursor_y += amount as usize;
+            //     }
+            // }
+            // // move cursor to begging of line downward
+            // 'E' => {
+            //     let amount = next_param_or(1);
+            //     self.cursor_y += amount as usize;
+            //     self.cursor_x = 0;
+            // }
+            // // move cursor to begging of line upward
+            // 'F' => {
+            //     let amount = next_param_or(1);
+            //     if self.cursor_y != 0 {
+            //         self.cursor_y -= amount as usize;
+            //         self.cursor_x = 0;
+            //     }
+            // }
+            // moves to specific column
+            'G' => {
+                let amount = next_param_or(1);
+                // TODO: might need to make it os that this will wrap
+                // see alacritty implementation on how to do it i suppose
+                if amount as usize > NUM_COLUMN {
+                    self.cursor_x = NUM_COLUMN;
+                } else {
+                    self.cursor_x = amount as usize;
+                }
+            }
+            // enable alternate buffer
+            'h' => match next_param_or(0) {
+                1049 => {
+                    println!("!!!!!!!!!!!!!!!!!!!!!!!!!!! requested alternate screen buffer");
+                    panic!("no more");
+                }
+                2004 => {
+                    // TODO: implement bracketed paste when you have clipboard pasting working
+                }
+                _ => {}
+            },
             _ => {} // _ => panic!("csi '{}' dispatch not implemented ", c)
         }
     }

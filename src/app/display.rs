@@ -78,6 +78,7 @@ impl<Message> TerminalDisplay<Message> {
         font_name: String,
         line_height: f32,
         stdin_read: Box<dyn Fn(char) -> Message>,
+        rows: usize,
     ) -> Self {
         let mut database = Database::new();
         database.load_system_fonts();
@@ -113,7 +114,7 @@ impl<Message> TerminalDisplay<Message> {
         // });
 
         Self {
-            cells: vec![Vec::new()],
+            cells: Vec::with_capacity(rows),
             font: font_name,
             glyph_size: get_glyph_size(font.source.clone(), font.index, ' ') * line_height + 0.05,
             font_source: font.source.clone(),
@@ -205,82 +206,173 @@ where
         {}
 
         let mut previous_style: Option<DisplayStyle> = None;
+
+        let mut render_cell = |position, size, content| {
+            renderer.fill_quad(
+                Quad {
+                    bounds: Rectangle::new(position, size),
+                    // ..Default::default()
+                    border: Border {
+                        color: Color::new(0.0, 1.0, 0.0, 0.2),
+                        width: 1.0,
+                        radius: Radius::new(0),
+                    },
+                    ..Default::default()
+                },
+                Color::new(1.0, 0.0, 0.0, 0.4),
+            );
+            // }
+            renderer.fill_text(
+                Text {
+                    // content: bundle.characters.iter().map(ToString::to_string).collect(),
+                    size: Pixels(self.line_height),
+                    line_height: LineHeight::Absolute(Pixels(self.line_height)),
+                    // bounds: Size::new(layout.bounds().width, self.line_height),
+                    bounds: size,
+                    font: unsafe { Font::with_name(make_static_str(&self.font)) }, //"ProggyClean CE Nerd Font"),
+                    horizontal_alignment: Horizontal::Left,
+                    vertical_alignment: Vertical::Top,
+                    wrapping: Wrapping::None,
+                    shaping: Shaping::Advanced, // might need advanced?
+                    content,
+                },
+                position,
+                // Point {
+                //     x: view_position.x + (self.glyph_size * bundle.character_start as f32),
+                //     y: view_position.y + (self.line_height * index as f32  )
+                // }, // position
+                Color::new(1.0, 1.0, 1.0, 1.0), // TODO
+                Rectangle::new(position, size), // clip bounds
+            );
+        };
         let mut bundle_text: Vec<char> = Vec::new();
+
         // TODO: try performance with just regular mutable index
-        for (index, row) in self.cells.iter().enumerate() {
+        for (index_y, row) in self.cells.iter().enumerate() {
+            println!(
+                "render: {:?}",
+                String::from_iter(row.iter().map(|cell| cell.character))
+            );
             let mut offset = 0;
-            for cell in row {
-                let mut char_width = 1;
+            let len = row.len();
+            for (index_x, cell) in row.iter().enumerate() {
                 if cell.character.is_ascii() {
                     if previous_style == cell.style {
-                        bundle_text.insert(bundle_text.len(), cell.character);
-                        // bundle_text[bundle_text.len()] = cell.character;
-                        continue;
+                        bundle_text.push(cell.character);
+                        if index_x != len - 1 {
+                            continue;
+                        }
+                    }
+
+                    if bundle_text.is_empty() {
+                        render_cell(
+                            Point {
+                                x: view_position.x + self.glyph_size * (index_x + offset) as f32,
+                                y: view_position.y + ((self.line_height) * index_y as f32),
+                            },
+                            Size::new(self.glyph_size, self.line_height),
+                            cell.character.to_string(),
+                        );
                     } else {
-                        previous_style = cell.style;
+                        // println!("index_x is: {:?}", index_x);
+                        // println!("bundle_text len: {:?}", bundle_text.len());
+                        // println!(
+                        //     "bundle text contains: {:?}",
+                        //     String::from_iter(bundle_text.iter())
+                        // );
+                        render_cell(
+                            Point {
+                                x: view_position.x
+                                    + self.glyph_size
+                                        * (index_x + 1 - bundle_text.len() + offset) as f32,
+                                y: view_position.y + ((self.line_height) * index_y as f32),
+                            },
+                            Size::new(
+                                self.glyph_size * (bundle_text.len() + 2) as f32,
+                                self.line_height,
+                            ),
+                            String::from_iter(bundle_text.iter()),
+                        );
+                        bundle_text.clear();
+                        previous_style = None;
                     }
                 } else {
-                    char_width = cell.character.width().unwrap();
-                    offset += char_width;
+                    // render previous bundle if there is one
+                    if !bundle_text.is_empty() {
+                        // println!("index_x is: {:?}", index_x);
+                        // println!("bundle_text len: {:?}", bundle_text.len());
+                        render_cell(
+                            Point {
+                                x: view_position.x
+                                    + self.glyph_size
+                                        * (index_x + offset - bundle_text.len()) as f32,
+                                y: view_position.y + ((self.line_height) * index_y as f32),
+                            },
+                            Size::new(self.glyph_size * bundle_text.len() as f32, self.line_height),
+                            String::from_iter(bundle_text.iter()),
+                        );
+                        bundle_text.clear();
+                    }
+
+                    let char_width = cell.character.width().unwrap_or(1);
+
+                    render_cell(
+                        Point {
+                            x: view_position.x + self.glyph_size * (index_x + offset) as f32,
+                            y: view_position.y + ((self.line_height) * index_y as f32),
+                        },
+                        Size::new(self.glyph_size * char_width as f32, self.line_height),
+                        cell.character.to_string(),
+                    );
+                    offset += char_width - 1;
                     previous_style = None;
                 }
-                let position = Point {
-                    x: view_position.x + self.glyph_size * (index + offset) as f32,
-                    // x: view_position.x + offset,
-                    y: view_position.y + ((self.line_height) * index as f32),
-                }; // position
 
-                // offset += glyph_size * (bundle.character_start) as f32;
-
-                let size = Size::new(
-                    self.glyph_size * (char_width + bundle_text.len()) as f32,
-                    self.line_height,
-                );
-                renderer.fill_quad(
-                    Quad {
-                        bounds: Rectangle::new(position, size),
-                        // ..Default::default()
-                        border: Border {
-                            color: Color::new(0.0, 1.0, 0.0, 0.2),
-                            width: 1.0,
-                            radius: Radius::new(0),
-                        },
-                        ..Default::default()
-                    },
-                    Color::new(1.0, 0.0, 0.0, 0.4),
-                );
+                // if cell.character.is_ascii() {
+                //     println!("got character: {:?}", cell.character);
+                //     let BundleOrChar::Bundle(ref mut bundle) = bundle_text else {
+                //         panic!("bundle text changed to character")
+                //     };
+                //     if previous_style == cell.style {
+                //         bundle[bundle.len()] = cell.character;
+                //         if index_x != len {
+                //             continue;
+                //         }
+                //     }
+                //     let position = Point {
+                //         x: view_position.x + self.glyph_size * (index_x + offset) as f32,
+                //         // x: view_position.x + offset,
+                //         y: view_position.y + ((self.line_height) * index_y as f32),
+                //     };
+                //     previous_style = cell.style;
+                // } else {
+                //     let char_width = cell.character.width().unwrap_or(1);
+                //     offset += char_width;
+                //     previous_style = None;
+                //
+                //     render_cell(
+                //         char_width,
+                //         // position
+                //         Point {
+                //             x: view_position.x + self.glyph_size * (index_x + offset) as f32,
+                //             // x: view_position.x + offset,
+                //             y: view_position.y + ((self.line_height) * index_y as f32),
+                //         },
+                //         BundleOrChar::Char(cell.character),
+                //     )
                 // }
-                renderer.fill_text(
-                    Text {
-                        // content: bundle.characters.iter().map(ToString::to_string).collect(),
-                        content: if bundle_text.is_empty() {
-                            cell.character.to_string()
-                        } else {
-                            // str::from_utf8(bun)
-                            String::from_iter(bundle_text.iter())
-                        },
-                        size: Pixels(self.line_height),
-                        line_height: LineHeight::Absolute(Pixels(self.line_height)),
-                        // bounds: Size::new(layout.bounds().width, self.line_height),
-                        bounds: size,
-                        font: unsafe { Font::with_name(make_static_str(&self.font)) }, //"ProggyClean CE Nerd Font"),
-                        horizontal_alignment: Horizontal::Left,
-                        vertical_alignment: Vertical::Top,
-                        wrapping: Wrapping::None,
-                        shaping: Shaping::Advanced, // might need advanced?
-                    },
-                    position,
-                    // Point {
-                    //     x: view_position.x + (self.glyph_size * bundle.character_start as f32),
-                    //     y: view_position.y + (self.line_height * index as f32  )
-                    // }, // position
-                    Color::new(1.0, 1.0, 1.0, 1.0), // TODO
-                    Rectangle::new(position, size), // clip bounds
-                );
-
+                //
+                // // offset += glyph_size * (bundle.character_start) as f32;
+                //
+                // let BundleOrChar::Bundle(ref mut bundle) = bundle_text else {
+                //     panic!("bundleorchar is char!")
+                // };
+                // bundle.clear();
+                //
                 // renderer.fill_text(text, position, color, clip_bounds);
                 // unicode_offset += offset;
             }
+            bundle_text.clear();
         }
 
         // let scrollbar_w = f32::from(cosmic_theme.spacing.space_xxs);
