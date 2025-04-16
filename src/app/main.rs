@@ -25,6 +25,7 @@ pub enum VigilMessages {
     WriteBuffer(String),
     StdoutRead(Vec<u8>),
     StdinInput(char),
+    MouseScroll(i8),
 }
 
 impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Application for VigilApp<NUM_ROW, NUM_COLUMN> {
@@ -56,6 +57,10 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Application for VigilApp<NUM
     }
 
     fn view(&self) -> cosmic::Element<Self::Message> {
+        println!(
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! in here the top displaying row is: {}",
+            self.terminal.display.top_displaying_row
+        );
         self.terminal.display.clone().into()
     }
 
@@ -67,7 +72,9 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Application for VigilApp<NUM
                 // let mut buffer = [0u8; 0x10_0000];
                 println!(
                     "the buffer to a string: {:?}",
-                    String::from_utf8(buf.clone()).unwrap_or_default()
+                    String::from_utf8(buf.clone())
+                        .unwrap_or_default()
+                        .replace("\0", "")
                 );
                 self.parser.advance(&mut self.terminal, &buf);
                 // self.terminal.read_buffer.append(&mut buf);
@@ -103,6 +110,13 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Application for VigilApp<NUM
                 //     .write_pty(char.encode_utf8(&mut buffer).as_bytes());
                 // let result = stream.write(char.encode_utf8(&mut buffer).as_bytes());
                 // println!("got result {:?}", result);
+            }
+            VigilMessages::MouseScroll(direction) => {
+                if direction > 0 {
+                    self.terminal.display.top_displaying_row += direction as usize;
+                } else {
+                    self.terminal.display.top_displaying_row -= -direction as usize;
+                }
             }
         }
         println!("hey i got buffer {:?}", self.terminal_buffer);

@@ -7,6 +7,7 @@ use cosmic::iced::event::Status;
 use cosmic::iced::keyboard::key::Named;
 use cosmic::iced::keyboard::Event as KeyEvent;
 use cosmic::iced::keyboard::Key;
+use cosmic::iced::mouse::{Event as MouseEvent, ScrollDelta};
 use cosmic::iced::Event;
 use cosmic::iced_core::renderer::Renderer as _;
 use cosmic::iced_core::text::Renderer as _;
@@ -44,6 +45,9 @@ pub struct TerminalDisplay<Message> {
     pub font_source: Source,
     pub font_index: u32,
     pub on_input: Rc<Box<dyn Fn(char) -> Message>>,
+    pub top_displaying_row: usize,
+    pub visible_rows: usize,
+    pub on_scroll: Rc<Box<dyn Fn(i8) -> Message>>,
 }
 
 // a bundle is a grou pof cells that have the exact same style
@@ -78,6 +82,7 @@ impl<Message> TerminalDisplay<Message> {
         font_name: String,
         line_height: f32,
         stdin_read: Box<dyn Fn(char) -> Message>,
+        on_scroll: Box<dyn Fn(i8) -> Message>,
         rows: usize,
     ) -> Self {
         let mut database = Database::new();
@@ -114,12 +119,15 @@ impl<Message> TerminalDisplay<Message> {
         // });
 
         Self {
-            cells: Vec::with_capacity(rows),
+            cells: Vec::new(),
             font: font_name,
             glyph_size: get_glyph_size(font.source.clone(), font.index, ' ') * line_height + 0.05,
             font_source: font.source.clone(),
             font_index: font.index,
             line_height,
+            top_displaying_row: 0,
+            visible_rows: rows,
+            on_scroll: Rc::new(on_scroll),
             on_input: Rc::new(stdin_read),
         }
     }
@@ -247,12 +255,17 @@ where
         };
         let mut bundle_text: Vec<char> = Vec::new();
 
+        println!("top displaying row is: {:?}", self.top_displaying_row);
         // TODO: try performance with just regular mutable index
-        for (index_y, row) in self.cells.iter().enumerate() {
-            println!(
-                "render: {:?}",
-                String::from_iter(row.iter().map(|cell| cell.character))
-            );
+        for (index_y, row) in self.cells[self.top_displaying_row..]
+            .iter()
+            .take(self.visible_rows)
+            .enumerate()
+        {
+            // println!(
+            //     "render: {:?}",
+            //     String::from_iter(row.iter().map(|cell| cell.character))
+            // );
             let mut offset = 0;
             let len = row.len();
             for (index_x, cell) in row.iter().enumerate() {
@@ -378,12 +391,24 @@ where
         // let scrollbar_w = f32::from(cosmic_theme.spacing.space_xxs);
     }
 
+    // fn mouse_interaction(
+    //     &self,
+    //     state: &cosmic::iced_core::widget::Tree,
+    //     layout: layout::Layout<'_>,
+    //     cursor: cosmic::iced_core::mouse::Cursor,
+    //     _viewport: &Rectangle,
+    //     _renderer: &Renderer,
+    // ) -> cosmic::iced_core::mouse::Interaction {
+    //     if let Some(position) = cursor.position_in(layout.bounds()) {
+    //
+    //     }
+    // }
     fn on_event(
         &mut self,
         _state: &mut cosmic::iced_core::widget::Tree,
         event: cosmic::iced::Event,
-        _layout: layout::Layout<'_>,
-        _cursor: cosmic::iced_core::mouse::Cursor,
+        layout: layout::Layout<'_>,
+        cursor: cosmic::iced_core::mouse::Cursor,
         _renderer: &Renderer,
         _clipboard: &mut dyn cosmic::iced_core::Clipboard,
         shell: &mut cosmic::iced_core::Shell<'_, Message>,
@@ -427,6 +452,40 @@ where
                 shell.publish(self.on_input.clone()(character));
                 return Status::Captured;
                 // }
+            }
+            Event::Mouse(MouseEvent::WheelScrolled { delta }) => {
+                if let Some(p) = cursor.position_in(layout.bounds()) {
+                    match delta {
+                        ScrollDelta::Lines { x: _, y } => {
+                            println!(
+                                "scrolled lines, top row: {:?},  visible: {:?}, cell len: {:?}",
+                                self.top_displaying_row,
+                                self.visible_rows,
+                                self.cells.len()
+                            );
+                            if y < 0.0 {
+                                if self.cells.len() > self.visible_rows {
+                                    if self.top_displaying_row
+                                        < self.cells.len() - self.visible_rows
+                                    {
+                                        shell.publish(self.on_scroll.clone()(1));
+                                        // self.top_displaying_row += 1;
+                                        return Status::Captured;
+                                    }
+                                }
+                                // if self.top_displaying_row + self.visible_rows < self.cells.len() {
+                                // }
+                            } else if self.top_displaying_row > 0 {
+                                shell.publish(self.on_scroll.clone()(-1));
+                                // self.top_displaying_row -= 1;
+                                return Status::Captured;
+                            }
+                        }
+                        _ => {
+                            println!("got pixels..");
+                        }
+                    }
+                }
             }
             _ => (),
         };

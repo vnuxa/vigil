@@ -48,6 +48,8 @@ pub struct Terminal<const NUM_ROW: usize, const NUM_COLUMN: usize> {
     pub previous_bundle_index: usize,
     pub stdout_stream: UnixStream,
     pub stdin_sender: UnixStream,
+    pub display_start: usize,
+    pub wrapping: bool,
     // pub master_fd: RawFd,
 }
 
@@ -72,14 +74,18 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
             read_buffer: Vec::new(),
             display: TerminalDisplay::new(
                 "Lilex Nerd Font".to_string(),
+                // "uushi".to_string(),
                 16.0,
                 Box::new(VigilMessages::StdinInput),
+                Box::new(VigilMessages::MouseScroll),
                 NUM_ROW,
             ),
             current_style: None,
             cursor_x: 0,
             cursor_y: 0,
             previous_bundle_index: 0,
+            display_start: 0,
+            wrapping: true,
             // master_fd: pty.file,
             stdout_stream,
             stdin_sender, // make it of type shell
@@ -87,7 +93,7 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
     }
 
     pub fn cursor_forward(&mut self, amount: usize) {
-        if self.cursor_x < NUM_COLUMN {
+        if self.cursor_x < NUM_COLUMN || !self.wrapping {
             self.cursor_x += 1;
         } else {
             // println!("cells {:?}", self.display.cells);
@@ -101,134 +107,42 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Terminal<NUM_ROW, NUM_COLUMN
             // increase the scrollback
         }
     }
-
-    // fn make_bundle(&self, c: char) -> DisplayBundle {
-    //     DisplayBundle {
-    //         characters: vec![c],
-    //         // style: None,
-    //         // style: self.current_style,
-    //         character_start: self.cursor_x,
-    //         character_end: self.cursor_x,
-    //         unicode_positions: Vec::new(),
-    //     }
-    // }
 }
 
 impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW, NUM_COLUMN> {
     fn print(&mut self, c: char) {
         // println!("adding char {:?}", c);
-        // self.out_buffer.push(c as u8);
-        // println!(
-        //     "got the cell thiing: {:?} with cursor y {:?}",
-        //     self.display.cells, self.cursor_y
-        // );
         let mut cell;
-        // let cell = self.display.cells.get_mut(self.cursor_y).unwrap();
         if let Some(obj_cell) = self.display.cells.get_mut(self.cursor_y) {
-            // println!("it already exists");
             cell = obj_cell;
         } else {
-            if self.display.cells.len() < self.cursor_y {
-                // self.display
-                //     .cells
-                //     .reserve(self.cursor_y - self.display.cells.len());
-                for _ in self.display.cells.len()..self.cursor_y {
-                    self.display.cells.push(Vec::with_capacity(NUM_COLUMN));
-                }
-                // println!("adding {:?}", self.cursor_y + 1 - self.display.cells.len());
-                // self.display
-                //     .cells
-                //     .reserve(self.cursor_y + 1 - self.display.cells.len());
-                // println!("len is: {:?}", self.display.cells.len());
+            if self.display.cells.len() < self.cursor_y + 1 {
+                self.display.cells.resize(self.cursor_y + 1, Vec::new());
             }
-            println!("using the non exist method");
+            println!("using the non exist method {:?}", self.cursor_y);
 
-            if self.display.cells.get(self.cursor_y).is_none() {
-                self.display
-                    .cells
-                    .insert(self.cursor_y, Vec::with_capacity(NUM_COLUMN));
-            }
             // self.display.cells[self.cursor_y] = Vec::with_capacity(NUM_COLUMN);
             cell = &mut self.display.cells[self.cursor_y];
         }
+
         // FIX: right now, you cannot add a cell at a specific index
         // big issue if you move cursor left 10 times and want to insert characters there
-        if let Some(item) = cell.get_mut(self.cursor_x) {
-            cell[self.cursor_x] = DisplayCell {
-                character: c,
-                style: self.current_style,
-            };
-        } else {
-            cell.insert(
-                self.cursor_x,
+        if cell.len() < self.cursor_x + 1 {
+            cell.resize(
+                self.cursor_x + 1,
                 DisplayCell {
-                    character: c,
-                    style: self.current_style,
+                    character: ' ',
+                    style: None,
                 },
             );
         }
-        // cell.push(DisplayCell {
-        //     character: c,
-        //     style: self.current_style,
-        // });
-        //
-        // cell.swap_remove(self.cursor_x);
-        // let _ = cell[self.cursor_x]
-        // std::mem::replace(
-        //     &mut cell[self.cursor_x],
-        //     DisplayCell {
-        //         character: c,
-        //         style: self.current_style,
-        //     },
-        // );
-        // cell[self.cursor_x] =
-        // self.cursor_x,
-        // );
-        // {
+        // println!("cursor x is: {:?}", self.cursor_x);
+        cell[self.cursor_x] = DisplayCell {
+            character: c,
+            style: self.current_style,
+        };
 
-        // cell = DisplayCell {
-        //     character: c,
-        //     style: self.current_style,
-        // };
-        // }
-        // if let Some(cell) = self.display.cells[self.cursor_y].get_mut(self.previous_bundle_index) {
-        //     // merge current cell to a bundle if its style matches
-        //     if cell.style == self.current_style {
-        //         cell.characters.push(c);
-        //         cell.character_end = self.cursor_x;
-        //         if !c.is_ascii() {
-        //             cell.unicode_positions.push(cell.characters.len() - 1);
-        //         }
-        //     } else {
-        //         // make a new bundle if style does not match
-        //         self.display.cells[self.cursor_y].push(DisplayBundle {
-        //             characters: vec![c],
-        //             style: self.current_style,
-        //             character_start: self.cursor_x,
-        //             character_end: self.cursor_x,
-        //             unicode_positions: if c.is_ascii() { Vec::new() } else { vec![0] },
-        //         });
-        //         self.previous_bundle_index = self.display.cells.len();
-        //     }
-        // } else {
-        //     self.display.cells[self.cursor_y].push(DisplayBundle {
-        //         characters: vec![c],
-        //         style: self.current_style,
-        //         character_start: self.cursor_x,
-        //         character_end: self.cursor_x,
-        //         unicode_positions: if c.is_ascii() { Vec::new() } else { vec![0] },
-        //     });
-        //     self.previous_bundle_index = self.display.cells.len();
-        // }
-        // self.display.cells[self.cursor_y][self.cursor_x] = DisplayCell {
-        //     character: c,
-        //     style: self.current_style
-        // };
         self.cursor_forward(1);
-        // if c.to_digit(20).unwrap() != 0 {
-        //     println!("wow its null");
-        // }
-        // println!("[print] {:?}", c);
     }
 
     fn execute(&mut self, byte: u8) {
@@ -397,72 +311,95 @@ impl<const NUM_ROW: usize, const NUM_COLUMN: usize> Perform for Terminal<NUM_ROW
             // move cursor forward by n
             'C' => {
                 let amount = next_param_or(1);
-                if (self.cursor_x + amount as usize) < NUM_COLUMN {
-                    self.cursor_x = NUM_COLUMN;
-                } else {
-                    self.cursor_x += amount as usize;
-                }
+                println!("requested to move forward by: {:?}", amount);
+                // if (self.cursor_x + amount as usize) > NUM_COLUMN {
+                //     // println!(
+                //     //     "!!!!!!!! its too much: {:?} + {:?} = {:?} which is also < {:?}",
+                //     //     self.cursor_x,
+                //     //     amount,
+                //     //     self.cursor_x + amount as usize,
+                //     //     NUM_COLUMN
+                //     // );
+                //     self.cursor_x = NUM_COLUMN;
+                // } else {
+                //     self.cursor_x += amount as usize;
+                // }
+                self.cursor_x = std::cmp::min(self.cursor_x + amount as usize, NUM_COLUMN);
             }
             // move cursor backward by n
             'D' => {
                 let amount = next_param_or(1);
-                if self.cursor_x - amount as usize > 0 {
-                    self.cursor_x -= amount as usize;
-                } else {
-                    self.cursor_x = 0;
-                }
+                self.cursor_x = std::cmp::max(self.cursor_x - amount as usize, 0);
+                // if self.cursor_x - amount as usize > 0 {
+                //     self.cursor_x -= amount as usize;
+                // } else {
+                //     self.cursor_x = 0;
+                // }
             }
             // move cursor up by n
             'A' => {
                 let amount = next_param_or(1);
-                if self.cursor_y - amount as usize > 0 {
+                self.cursor_y = std::cmp::max(self.cursor_y - amount as usize, 0);
+                // if self.cursor_y - amount as usize > 0 {
+                //     self.cursor_y -= amount as usize;
+                // } else {
+                //     self.cursor_y = 0;
+                // }
+            }
+            // move cursor down by n
+            'B' => {
+                let amount = next_param_or(1);
+                self.cursor_y += amount as usize;
+                // if (self.cursor_y + amount as usize) < NUM_ROW {
+                //     self.cursor_y = NUM_ROW;
+                // } else {
+                //     self.cursor_y += amount as usize;
+                // }
+            }
+            // move cursor to begging of line downward
+            'E' => {
+                let amount = next_param_or(1);
+                self.cursor_y += amount as usize;
+                self.cursor_x = 0;
+            }
+            // move cursor to begging of line upward
+            'F' => {
+                let amount = next_param_or(1);
+                if self.cursor_y != 0 {
                     self.cursor_y -= amount as usize;
-                } else {
-                    self.cursor_y = 0;
+                    self.cursor_x = 0;
                 }
             }
-            // // move cursor down by n
-            // 'B' => {
-            //     let amount = next_param_or(1);
-            //     if (self.cursor_y + amount as usize) < NUM_ROW {
-            //         self.cursor_y = NUM_ROW;
-            //     } else {
-            //         self.cursor_y += amount as usize;
-            //     }
-            // }
-            // // move cursor to begging of line downward
-            // 'E' => {
-            //     let amount = next_param_or(1);
-            //     self.cursor_y += amount as usize;
-            //     self.cursor_x = 0;
-            // }
-            // // move cursor to begging of line upward
-            // 'F' => {
-            //     let amount = next_param_or(1);
-            //     if self.cursor_y != 0 {
-            //         self.cursor_y -= amount as usize;
-            //         self.cursor_x = 0;
-            //     }
-            // }
-            // moves to specific column
+            //moves to specific column
             'G' => {
                 let amount = next_param_or(1);
                 // TODO: might need to make it os that this will wrap
                 // see alacritty implementation on how to do it i suppose
-                if amount as usize > NUM_COLUMN {
-                    self.cursor_x = NUM_COLUMN;
-                } else {
-                    self.cursor_x = amount as usize;
-                }
+                self.cursor_x = std::cmp::min(amount as usize, NUM_COLUMN);
+                //if amount as usize > NUM_COLUMN {
+                //self.cursor_x = NUM_COLUMN;
+                //} else {
+                //self.cursor_x = amount as usize;
+                //}
             }
             // enable alternate buffer
+            'l' => match next_param_or(0) {
+                7 => {
+                    self.wrapping = false;
+                }
+                _ => {}
+            },
             'h' => match next_param_or(0) {
                 1049 => {
                     println!("!!!!!!!!!!!!!!!!!!!!!!!!!!! requested alternate screen buffer");
-                    panic!("no more");
+                    // panic!("no more");
                 }
                 2004 => {
                     // TODO: implement bracketed paste when you have clipboard pasting working
+                }
+                7 => {
+                    self.wrapping = true;
+                    // panic!("got 7 restore thingy ");
                 }
                 _ => {}
             },
@@ -671,7 +608,13 @@ impl Pty {
                                 match read_from_fd(self.file.as_raw_fd()) {
                                     Some(read_bytes) => {
                                         println!("read bytes {:?}", read_bytes);
-                                        out_sender.write_all(&read_bytes).unwrap();
+                                        println!(
+                                            "to convert those bytes to string: {:?}",
+                                            String::from_utf8(read_bytes.clone())
+                                                .unwrap_or_default()
+                                                .replace("\0", "")
+                                        );
+                                        out_sender.write(&read_bytes).unwrap();
                                     }
                                     None => {
                                         println!("no more to read");
@@ -757,15 +700,20 @@ pub fn make_io_subscription(mut stream_stdout: UnixStream) -> Subscription<Vigil
     Subscription::run_with_id(
         1,
         stream::channel(100, move |mut output| async move {
-            let mut buf = [0; 65536];
             spawn_blocking(move || loop {
+                let mut buf = [0; 65536];
                 // let mut stdout = stream_stdout;
-                if let Err(msg) = stream_stdout.read(&mut buf) {
-                    println!("needs to wait?");
-                }
+                // if let Err(msg) = stream_stdout.read(&mut buf) {
+                //     println!("needs to wait?");
+                // }
+                let read = stream_stdout.read(&mut buf);
+
+                println!("hey i reead: {:?}", read);
+
                 output
                     .try_send(VigilMessages::StdoutRead(buf.to_vec()))
                     .unwrap();
+
                 // println!("got msg");
             });
             println!("thread after!!");
